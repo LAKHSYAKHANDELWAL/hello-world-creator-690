@@ -3,8 +3,8 @@ import React from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
-type Homework = {
-  id: string;
+type Homework = {  
+  id: string;   
   title: string;
   description: string;
   due_date: string | null;
