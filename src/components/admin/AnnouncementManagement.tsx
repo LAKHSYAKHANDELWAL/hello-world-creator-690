@@ -155,19 +155,27 @@ export function AnnouncementManagement() {
         }
       });
 
+      console.log('FCM response:', response);
+
       if (response.error) {
-        throw response.error;
+        console.error('FCM function error:', response.error);
+        throw new Error(response.error.message || 'Failed to send push notification');
       }
 
-      toast({
-        title: "Success",
-        description: response.data?.message || "Push notification sent successfully",
-      });
+      const data = response.data;
+      if (data?.success) {
+        toast({
+          title: "Success",
+          description: data.message || "Push notification sent successfully",
+        });
+      } else {
+        throw new Error(data?.error || 'Unknown error occurred');
+      }
     } catch (error) {
       console.error('Push notification error:', error);
       toast({
-        title: "Warning",
-        description: "Announcement created but push notification failed to send",
+        title: "Warning", 
+        description: "Announcement created but push notification failed. Please check if the student_tokens table exists and has FCM tokens.",
         variant: "destructive",
       });
     } finally {
