@@ -5,50 +5,46 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { Trash2, Edit, Calendar, Users, Upload, File, MessageSquare, Plus, Send, Filter, Search } from 'lucide-react';
+import { MultiSelect, MultiSelectOption } from '@/components/ui/multi-select';
+import { Trash2, Edit, Calendar, Users, Upload, File, MessageSquare, Plus, Send, Bell, Filter, Search } from 'lucide-react';
 
 type Announcement = {
   id: string;
   title: string;
   description: string;
   image_url?: string;
-  target_type: 'single' | 'multiple' | 'class_section' | 'whole_school';
+  target_type?: 'single' | 'multiple' | 'class_section' | 'whole_school';
   target_ids?: string[];
   target_class?: string;
   target_section?: string;
   post_date: string;
-  created_at: string;
-  is_read: boolean;
+  is_read?: boolean;
   sent_by?: string;
+  created_at: string;
 };
 
 type Student = {
   id: string;
-  full_name: string;
   name: string;
   class: string;
   section: string;
-  login_id: string;
 };
 
 export function AnnouncementManagement() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
-  const [classes, setClasses] = useState<string[]>([]);
-  const [sections, setSections] = useState<string[]>([]);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [sendingPush, setSendingPush] = useState(false);
-  const [filterTargetType, setFilterTargetType] = useState<string>('all');
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [sendingNotification, setSendingNotification] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState<string>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -58,22 +54,29 @@ export function AnnouncementManagement() {
     target_class: '',
     target_section: '',
     post_date: new Date().toISOString().split('T')[0],
-    send_push: false,
+    send_notification: false
   });
-  
   const { toast } = useToast();
+
+  const classes = Array.from({length: 12}, (_, i) => `Class ${i + 1}`);
 
   useEffect(() => {
     fetchAnnouncements();
     fetchStudents();
-    fetchClasses();
   }, []);
 
-  useEffect(() => {
-    if (formData.target_class) {
-      fetchSections(formData.target_class);
+  const fetchStudents = async () => {
+    const { data, error } = await supabase
+      .from('students')
+      .select('id, name, class, section')
+      .order('name');
+    
+    if (error) {
+      console.error('Error fetching students:', error);
+    } else {
+      setStudents(data || []);
     }
-  }, [formData.target_class]);
+  };
 
   const fetchAnnouncements = async () => {
     const { data, error } = await supabase
@@ -90,63 +93,6 @@ export function AnnouncementManagement() {
     } else {
       setAnnouncements(data || []);
     }
-  };
-
-  const fetchStudents = async () => {
-    const { data, error } = await supabase
-      .from('students')
-      .select('id, full_name, name, class, section, login_id')
-      .order('class')
-      .order('full_name');
-    
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch students",
-        variant: "destructive",
-      });
-    } else {
-      setStudents(data || []);
-    }
-  };
-
-  const fetchClasses = async () => {
-    const { data, error } = await supabase
-      .from('students')
-      .select('class')
-      .not('class', 'is', null);
-    
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch classes",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const uniqueClasses = [...new Set(data.map(item => item.class))].sort();
-    setClasses(uniqueClasses);
-  };
-
-  const fetchSections = async (className: string) => {
-    const { data, error } = await supabase
-      .from('students')
-      .select('section')
-      .eq('class', className)
-      .not('section', 'is', null);
-    
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch sections",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const uniqueSections = [...new Set(data.map(item => item.section))].sort();
-    setSections(uniqueSections);
   };
 
   const handleFileSelect = () => {
@@ -193,50 +139,47 @@ export function AnnouncementManagement() {
     }
   };
 
-  const sendPushNotification = async (announcement: Announcement) => {
+  const sendPushNotification = async (announcement: any, fileUrl?: string) => {
     try {
-      setSendingPush(true);
+      setSendingNotification(true);
       
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push-notification`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          announcementId: announcement.id,
-          title: announcement.title,
-          body: announcement.description,
-          imageUrl: announcement.image_url,
+      const response = await supabase.functions.invoke('send-fcm-notification', {
+        body: {
           targetType: announcement.target_type,
           targetIds: announcement.target_ids,
           targetClass: announcement.target_class,
           targetSection: announcement.target_section,
-        }),
+          title: announcement.title,
+          description: announcement.description,
+          imageUrl: fileUrl || announcement.image_url || ''
+        }
       });
 
-      const result = await response.json();
-      
-      if (result.success) {
+      console.log('FCM response:', response);
+
+      if (response.error) {
+        console.error('FCM function error:', response.error);
+        throw new Error(response.error.message || 'Failed to send push notification');
+      }
+
+      const data = response.data;
+      if (data?.success) {
         toast({
-          title: "Push Notification Sent",
-          description: `Successfully sent to ${result.sentCount} device(s)`,
+          title: "Success",
+          description: data.message || "Push notification sent successfully",
         });
       } else {
-        toast({
-          title: "Push Notification Failed",
-          description: result.message || "Failed to send push notification",
-          variant: "destructive",
-        });
+        throw new Error(data?.error || 'Unknown error occurred');
       }
     } catch (error) {
+      console.error('Push notification error:', error);
       toast({
-        title: "Error",
-        description: "Failed to send push notification",
+        title: "Warning", 
+        description: "Announcement created but push notification failed. Please check if the student_tokens table exists and has FCM tokens.",
         variant: "destructive",
       });
     } finally {
-      setSendingPush(false);
+      setSendingNotification(false);
     }
   };
 
@@ -265,7 +208,7 @@ export function AnnouncementManagement() {
       target_section: formData.target_type === 'class_section' ? formData.target_section : null,
       post_date: formData.post_date,
       is_read: false,
-      sent_by: 'Admin', // Replace with actual admin name when auth is implemented
+      sent_by: 'admin'
     };
 
     if (editingAnnouncement) {
@@ -280,20 +223,18 @@ export function AnnouncementManagement() {
           description: "Failed to update announcement",
           variant: "destructive",
         });
-        return;
       } else {
         toast({
           title: "Success",
           description: "Announcement updated successfully",
         });
         setEditingAnnouncement(null);
+        fetchAnnouncements();
       }
     } else {
-      const { data: newAnnouncement, error } = await supabase
+      const { error } = await supabase
         .from('announcements')
-        .insert([announcementData])
-        .select()
-        .single();
+        .insert([announcementData]);
       
       if (error) {
         toast({
@@ -301,7 +242,6 @@ export function AnnouncementManagement() {
           description: "Failed to create announcement",
           variant: "destructive",
         });
-        return;
       } else {
         toast({
           title: "Success",
@@ -309,13 +249,14 @@ export function AnnouncementManagement() {
         });
         
         // Send push notification if requested
-        if (formData.send_push && newAnnouncement) {
-          await sendPushNotification(newAnnouncement);
+        if (formData.send_notification) {
+          await sendPushNotification(announcementData, fileUrl);
         }
+        
+        fetchAnnouncements();
       }
     }
     
-    fetchAnnouncements();
     resetForm();
   };
 
@@ -329,7 +270,7 @@ export function AnnouncementManagement() {
       target_class: '',
       target_section: '',
       post_date: new Date().toISOString().split('T')[0],
-      send_push: false,
+      send_notification: false
     });
     setSelectedFile(null);
     if (fileInputRef.current) {
@@ -369,7 +310,7 @@ export function AnnouncementManagement() {
       target_class: announcement.target_class || '',
       target_section: announcement.target_section || '',
       post_date: announcement.post_date || new Date().toISOString().split('T')[0],
-      send_push: false,
+      send_notification: false
     });
   };
 
@@ -377,39 +318,30 @@ export function AnnouncementManagement() {
     await sendPushNotification(announcement);
   };
 
+  const filteredAnnouncements = announcements.filter(announcement => {
+    const matchesSearch = announcement.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         announcement.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter = filterType === 'all' || announcement.target_type === filterType;
+    return matchesSearch && matchesFilter;
+  });
+
   const getTargetDisplay = (announcement: Announcement) => {
-    switch (announcement.target_type) {
-      case 'single':
-        const singleStudent = students.find(s => s.id === announcement.target_ids?.[0]);
-        return `Student: ${singleStudent?.full_name || singleStudent?.name || 'Unknown'}`;
-      case 'multiple':
-        return `${announcement.target_ids?.length || 0} Students`;
-      case 'class_section':
-        return `${announcement.target_class}${announcement.target_section ? ` - ${announcement.target_section}` : ''}`;
-      case 'whole_school':
-        return 'Whole School';
-      default:
-        return 'Unknown';
+    if (announcement.target_type === 'single' && announcement.target_ids?.length) {
+      const student = students.find(s => s.id === announcement.target_ids?.[0]);
+      return student ? `Student: ${student.name}` : 'Single Student';
+    } else if (announcement.target_type === 'multiple' && announcement.target_ids?.length) {
+      return `${announcement.target_ids.length} Students`;
+    } else if (announcement.target_type === 'class_section') {
+      return `${announcement.target_class || 'All Classes'}${announcement.target_section ? ` - ${announcement.target_section}` : ''}`;
+    } else {
+      return 'Whole School';
     }
   };
 
-  const getFilteredAnnouncements = () => {
-    return announcements.filter(announcement => {
-      const matchesTargetType = filterTargetType === 'all' || announcement.target_type === filterTargetType;
-      const matchesSearch = searchTerm === '' || 
-        announcement.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        announcement.description?.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesTargetType && matchesSearch;
-    });
-  };
-
-  const getStudentsForClass = (className: string) => {
-    return students.filter(s => s.class === className);
-  };
-
-  const handleTargetIdsChange = (studentIds: string[]) => {
-    setFormData(prev => ({ ...prev, target_ids: studentIds }));
-  };
+  const studentOptions: MultiSelectOption[] = students.map(student => ({
+    label: `${student.name} (${student.class} - ${student.section})`,
+    value: student.id
+  }));
 
   return (
     <div className="space-y-6">
@@ -428,43 +360,47 @@ export function AnnouncementManagement() {
         <TabsContent value="view" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Recent Announcements</CardTitle>
-              <div className="flex gap-4 items-center">
-                <div className="flex items-center gap-2">
-                  <Search className="h-4 w-4" />
-                  <Input
-                    placeholder="Search announcements..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-64"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4" />
-                  <Select value={filterTargetType} onValueChange={setFilterTargetType}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Filter by target" />
+              <CardTitle className="flex items-center justify-between">
+                Recent Announcements
+                <div className="flex gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                    <Input
+                      placeholder="Search announcements..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10 w-64"
+                    />
+                  </div>
+                  <Select value={filterType} onValueChange={setFilterType}>
+                    <SelectTrigger className="w-40">
+                      <Filter className="h-4 w-4 mr-2" />
+                      <SelectValue placeholder="Filter by type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Targets</SelectItem>
-                      <SelectItem value="single">Single Student</SelectItem>
-                      <SelectItem value="multiple">Multiple Students</SelectItem>
-                      <SelectItem value="class_section">Class/Section</SelectItem>
+                      <SelectItem value="all">All Types</SelectItem>
                       <SelectItem value="whole_school">Whole School</SelectItem>
+                      <SelectItem value="class_section">Class/Section</SelectItem>
+                      <SelectItem value="multiple">Multiple Students</SelectItem>
+                      <SelectItem value="single">Single Student</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {getFilteredAnnouncements().map((announcement) => (
+                {filteredAnnouncements.map((announcement) => (
                   <div key={announcement.id} className="p-4 border rounded-lg">
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
-                        <h3 className="font-semibold text-lg mb-2">{announcement.title}</h3>
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="font-semibold text-lg">{announcement.title}</h3>
+                          <Badge variant="secondary" className="text-xs">
+                            {getTargetDisplay(announcement)}
+                          </Badge>
+                        </div>
                         <p className="text-muted-foreground mb-3">{announcement.description}</p>
-                        
                         {announcement.image_url && (
                           <div className="mb-3">
                             {announcement.image_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
@@ -486,43 +422,28 @@ export function AnnouncementManagement() {
                             )}
                           </div>
                         )}
-                        
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground mb-3">
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
                           <div className="flex items-center gap-1">
                             <Calendar className="h-4 w-4" />
                             <span>{new Date(announcement.post_date).toLocaleDateString()}</span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <Users className="h-4 w-4" />
-                            <span>{getTargetDisplay(announcement)}</span>
-                          </div>
                           {announcement.sent_by && (
-                            <div>
+                            <div className="flex items-center gap-1">
+                              <Users className="h-4 w-4" />
                               <span>By: {announcement.sent_by}</span>
                             </div>
                           )}
                         </div>
-                        
-                        <div className="flex items-center gap-2">
-                          <Badge variant={announcement.target_type === 'whole_school' ? 'default' : 'secondary'}>
-                            {announcement.target_type.replace('_', ' ').toUpperCase()}
-                          </Badge>
-                          {!announcement.is_read && (
-                            <Badge variant="destructive">Unread</Badge>
-                          )}
-                        </div>
                       </div>
-                      
                       <div className="flex gap-2">
                         <Button 
                           size="sm" 
                           variant="outline" 
                           onClick={() => handleResendPush(announcement)}
-                          disabled={sendingPush}
-                          className="flex items-center gap-1"
+                          disabled={sendingNotification}
+                          title="Resend Push Notification"
                         >
-                          <Send className="h-4 w-4" />
-                          {sendingPush ? 'Sending...' : 'Resend Push'}
+                          <Bell className="h-4 w-4" />
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => handleEdit(announcement)}>
                           <Edit className="h-4 w-4" />
@@ -534,9 +455,9 @@ export function AnnouncementManagement() {
                     </div>
                   </div>
                 ))}
-                {getFilteredAnnouncements().length === 0 && (
+                {filteredAnnouncements.length === 0 && (
                   <p className="text-center text-muted-foreground py-8">
-                    No announcements found matching your criteria.
+                    {searchTerm || filterType !== 'all' ? 'No announcements match your search criteria.' : 'No announcements found. Create your first announcement above.'}
                   </p>
                 )}
               </div>
@@ -561,7 +482,6 @@ export function AnnouncementManagement() {
                     required
                   />
                 </div>
-                
                 <div>
                   <Label htmlFor="description">Description *</Label>
                   <Textarea
@@ -573,7 +493,6 @@ export function AnnouncementManagement() {
                     rows={4}
                   />
                 </div>
-                
                 <div>
                   <Label>Attachment (optional)</Label>
                   <div className="space-y-2">
@@ -618,14 +537,11 @@ export function AnnouncementManagement() {
                     )}
                   </div>
                 </div>
-
                 <div>
                   <Label htmlFor="target_type">Target Audience *</Label>
                   <Select 
                     value={formData.target_type} 
-                    onValueChange={(value: 'single' | 'multiple' | 'class_section' | 'whole_school') => 
-                      setFormData({ ...formData, target_type: value, target_ids: [], target_class: '', target_section: '' })
-                    }
+                    onValueChange={(value: any) => setFormData({ ...formData, target_type: value, target_ids: [], target_class: '', target_section: '' })}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select target audience" />
@@ -633,13 +549,12 @@ export function AnnouncementManagement() {
                     <SelectContent>
                       <SelectItem value="whole_school">Whole School</SelectItem>
                       <SelectItem value="class_section">Class/Section</SelectItem>
-                      <SelectItem value="single">One Student</SelectItem>
                       <SelectItem value="multiple">Multiple Students</SelectItem>
+                      <SelectItem value="single">Single Student</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                {/* Target-specific inputs */}
                 {formData.target_type === 'single' && (
                   <div>
                     <Label htmlFor="single_student">Select Student *</Label>
@@ -653,7 +568,7 @@ export function AnnouncementManagement() {
                       <SelectContent>
                         {students.map((student) => (
                           <SelectItem key={student.id} value={student.id}>
-                            {student.full_name || student.name} - {student.class} {student.section} ({student.login_id})
+                            {student.name} ({student.class} - {student.section})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -663,30 +578,14 @@ export function AnnouncementManagement() {
 
                 {formData.target_type === 'multiple' && (
                   <div>
-                    <Label>Select Students *</Label>
-                    <div className="border rounded-lg p-4 max-h-48 overflow-y-auto">
-                      {students.map((student) => (
-                        <div key={student.id} className="flex items-center space-x-2 py-1">
-                          <Checkbox
-                            id={student.id}
-                            checked={formData.target_ids.includes(student.id)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                handleTargetIdsChange([...formData.target_ids, student.id]);
-                              } else {
-                                handleTargetIdsChange(formData.target_ids.filter(id => id !== student.id));
-                              }
-                            }}
-                          />
-                          <Label htmlFor={student.id} className="text-sm cursor-pointer">
-                            {student.full_name || student.name} - {student.class} {student.section}
-                          </Label>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      {formData.target_ids.length} student(s) selected
-                    </p>
+                    <Label htmlFor="multiple_students">Select Students *</Label>
+                    <MultiSelect
+                      options={studentOptions}
+                      selected={formData.target_ids}
+                      onChange={(values) => setFormData({ ...formData, target_ids: values })}
+                      placeholder="Select multiple students"
+                      className="w-full"
+                    />
                   </div>
                 )}
 
@@ -696,7 +595,7 @@ export function AnnouncementManagement() {
                       <Label htmlFor="target_class">Target Class *</Label>
                       <Select 
                         value={formData.target_class} 
-                        onValueChange={(value) => setFormData({ ...formData, target_class: value, target_section: '' })}
+                        onValueChange={(value) => setFormData({ ...formData, target_class: value })}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select class" />
@@ -712,27 +611,15 @@ export function AnnouncementManagement() {
                     </div>
                     <div>
                       <Label htmlFor="target_section">Target Section (optional)</Label>
-                      <Select 
-                        value={formData.target_section} 
-                        onValueChange={(value) => setFormData({ ...formData, target_section: value })}
-                        disabled={!formData.target_class}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select section" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">All Sections</SelectItem>
-                          {sections.map((section) => (
-                            <SelectItem key={section} value={section}>
-                              {section}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Input
+                        id="target_section"
+                        value={formData.target_section}
+                        onChange={(e) => setFormData({ ...formData, target_section: e.target.value })}
+                        placeholder="Enter section (leave empty for all sections)"
+                      />
                     </div>
                   </div>
                 )}
-
                 <div>
                   <Label htmlFor="post_date">Post Date</Label>
                   <Input
@@ -746,18 +633,18 @@ export function AnnouncementManagement() {
 
                 <div className="flex items-center space-x-2">
                   <Checkbox
-                    id="send_push"
-                    checked={formData.send_push}
-                    onCheckedChange={(checked) => setFormData({ ...formData, send_push: checked as boolean })}
+                    id="send_notification"
+                    checked={formData.send_notification}
+                    onCheckedChange={(checked) => setFormData({ ...formData, send_notification: !!checked })}
                   />
-                  <Label htmlFor="send_push" className="text-sm font-medium cursor-pointer">
+                  <Label htmlFor="send_notification" className="flex items-center gap-2">
+                    <Bell className="h-4 w-4" />
                     Send as Push Notification
                   </Label>
                 </div>
-                
                 <div className="flex gap-2">
-                  <Button type="submit" disabled={uploadingFile || sendingPush}>
-                    {uploadingFile ? 'Uploading...' : sendingPush ? 'Sending...' : editingAnnouncement ? 'Update Announcement' : 'Create Announcement'}
+                  <Button type="submit" disabled={uploadingFile || sendingNotification}>
+                    {uploadingFile ? 'Uploading...' : sendingNotification ? 'Sending...' : editingAnnouncement ? 'Update Announcement' : 'Create Announcement'}
                   </Button>
                   {editingAnnouncement && (
                     <Button 
