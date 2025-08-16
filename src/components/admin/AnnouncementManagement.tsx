@@ -44,6 +44,7 @@ export function AnnouncementManagement() {
   const [sendingNotification, setSendingNotification] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<'view' | 'add'>('view');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     title: '',
@@ -279,23 +280,23 @@ export function AnnouncementManagement() {
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase
-      .from('announcements')
-      .delete()
-      .eq('id', id);
-    
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to delete announcement",
-        variant: "destructive",
-      });
-    } else {
+    try {
+      const { error } = await supabase
+        .from('announcements')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
       toast({
         title: "Success",
         description: "Announcement deleted successfully",
       });
       fetchAnnouncements();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete announcement",
+        variant: "destructive",
+      });
     }
   };
 
@@ -312,6 +313,7 @@ export function AnnouncementManagement() {
       post_date: announcement.post_date || new Date().toISOString().split('T')[0],
       send_notification: false
     });
+    setActiveTab('add');
   };
 
   const handleResendPush = async (announcement: Announcement) => {
@@ -345,7 +347,7 @@ export function AnnouncementManagement() {
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="view" className="w-full">
+      <Tabs value={activeTab} onValueChange={tab => setActiveTab(tab as 'view' | 'add')} className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="view" className="flex items-center gap-2">
             <MessageSquare className="h-4 w-4" />
