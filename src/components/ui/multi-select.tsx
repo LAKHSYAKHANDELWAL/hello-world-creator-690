@@ -29,14 +29,15 @@ export function MultiSelect({
   const [open, setOpen] = React.useState(false)
 
   const handleUnselect = (item: string) => {
-    onChange(selected.filter((i) => i !== item))
+    onChange((selected || []).filter((i) => i !== item))
   }
 
   const handleSelect = (value: string) => {
-    if (selected.includes(value)) {
-      onChange(selected.filter((item) => item !== value))
+    const currentSelected = selected || []
+    if (currentSelected.includes(value)) {
+      onChange(currentSelected.filter((item) => item !== value))
     } else {
-      onChange([...selected, value])
+      onChange([...currentSelected, value])
     }
   }
 
@@ -51,7 +52,7 @@ export function MultiSelect({
           onClick={() => setOpen(!open)}
         >
           <div className="flex gap-1 flex-wrap">
-            {selected.length > 0 ? (
+            {selected?.length > 0 ? (
               selected.map((item) => {
                 const option = options.find((opt) => opt.value === item)
                 return (
@@ -104,12 +105,12 @@ export function MultiSelect({
                 key={option.value}
                 onSelect={() => handleSelect(option.value)}
               >
-                <Check
-                  className={cn(
-                    "mr-2 h-4 w-4",
-                    selected.includes(option.value) ? "opacity-100" : "opacity-0"
-                  )}
-                />
+                 <Check
+                   className={cn(
+                     "mr-2 h-4 w-4",
+                     (selected || []).includes(option.value) ? "opacity-100" : "opacity-0"
+                   )}
+                 />
                 {option.label}
               </CommandItem>
             ))}

@@ -555,13 +555,13 @@ export function AnnouncementManagement() {
                   </Select>
                 </div>
 
-                {formData.target_type === 'single' && (
-                  <div>
-                    <Label htmlFor="single_student">Select Student *</Label>
-                    <Select 
-                      value={formData.target_ids[0] || ''} 
-                      onValueChange={(value) => setFormData({ ...formData, target_ids: [value] })}
-                    >
+                 {formData.target_type === 'single' && (
+                   <div>
+                     <Label htmlFor="single_student">Select Student *</Label>
+                     <Select 
+                       value={formData.target_ids?.[0] || ''} 
+                       onValueChange={(value) => setFormData({ ...formData, target_ids: [value] })}
+                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select a student" />
                       </SelectTrigger>
@@ -576,18 +576,18 @@ export function AnnouncementManagement() {
                   </div>
                 )}
 
-                {formData.target_type === 'multiple' && (
-                  <div>
-                    <Label htmlFor="multiple_students">Select Students *</Label>
-                    <MultiSelect
-                      options={studentOptions}
-                      selected={formData.target_ids}
-                      onChange={(values) => setFormData({ ...formData, target_ids: values })}
-                      placeholder="Select multiple students"
-                      className="w-full"
-                    />
-                  </div>
-                )}
+                 {formData.target_type === 'multiple' && (
+                   <div>
+                     <Label htmlFor="multiple_students">Select Students *</Label>
+                     <MultiSelect
+                       options={studentOptions}
+                       selected={formData.target_ids || []}
+                       onChange={(values) => setFormData({ ...formData, target_ids: values })}
+                       placeholder="Select multiple students"
+                       className="w-full"
+                     />
+                   </div>
+                 )}
 
                 {formData.target_type === 'class_section' && (
                   <div className="grid grid-cols-2 gap-4">
