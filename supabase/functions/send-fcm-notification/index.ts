@@ -16,6 +16,15 @@ serve(async (req) => {
 
     console.log('Received FCM request:', { targetType, targetIds, targetClass, targetSection, title })
 
+    // Validate required fields
+    if (!title || !description) {
+      throw new Error('Title and description are required')
+    }
+
+    if (!targetType || !['single', 'multiple', 'class_section', 'whole_school'].includes(targetType)) {
+      throw new Error('Invalid target type')
+    }
+
     // Initialize Supabase client
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -25,7 +34,7 @@ serve(async (req) => {
     // Get Firebase service account key from secrets
     const serviceAccountKey = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_KEY')
     if (!serviceAccountKey) {
-      throw new Error('Firebase service account key not found')
+      throw new Error('Firebase service account key not found. Please add FIREBASE_SERVICE_ACCOUNT_KEY secret in Supabase.')
     }
 
     let serviceAccount
@@ -36,10 +45,15 @@ serve(async (req) => {
       throw new Error('Invalid Firebase service account key format')
     }
 
+    // Validate serviceAccount has required fields
+    if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
+      throw new Error('Invalid service account key: missing required fields')
+    }
+
     // Get FCM tokens based on target type
     let tokensQuery = supabaseClient
       .from('student_tokens')
-      .select('fcm_token')
+      .select('fcm_token, student_id, class, section')
 
     if (targetType === 'single' && targetIds?.length > 0) {
       tokensQuery = tokensQuery.eq('student_id', targetIds[0])
@@ -55,15 +69,27 @@ serve(async (req) => {
 
     if (tokenError) {
       console.error('Error fetching tokens:', tokenError)
-      throw tokenError
+      if (tokenError.code === '42P01') {
+        throw new Error('student_tokens table does not exist. Please create it first.')
+      }
+      throw new Error(`Database error: ${tokenError.message}`)
     }
 
     const fcmTokens = tokenData?.map(row => row.fcm_token).filter(Boolean) || []
-    console.log(`Found ${fcmTokens.length} FCM tokens`)
+    console.log(`Found ${fcmTokens.length} FCM tokens for target type: ${targetType}`)
 
     if (fcmTokens.length === 0) {
+      let message = 'No FCM tokens found for the specified targets'
+      if (targetType === 'single') {
+        message = 'No FCM token found for the specified student'
+      } else if (targetType === 'multiple') {
+        message = 'No FCM tokens found for the specified students'
+      } else if (targetType === 'class_section') {
+        message = `No FCM tokens found for class ${targetClass}${targetSection ? ` section ${targetSection}` : ''}`
+      }
+      
       return new Response(
-        JSON.stringify({ success: true, message: 'No FCM tokens found for the specified targets' }),
+        JSON.stringify({ success: true, message, tokensFound: 0 }),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 200
@@ -78,45 +104,54 @@ serve(async (req) => {
       throw new Error('Failed to get Firebase access token')
     }
 
-    // Send FCM notifications
+    // Send FCM notifications (process all tokens, not just 10)
     const fcmUrl = `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`
     const results = []
-
-    for (const token of fcmTokens.slice(0, 10)) { // Limit to 10 tokens for testing
-      const message = {
-        message: {
-          token: token,
-          notification: {
-            title: title,
-            body: description,
-            ...(imageUrl && imageUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) && { image: imageUrl })
-          },
-          data: {
-            title: title,
-            body: description,
-            type: 'announcement',
-            ...(imageUrl && { imageUrl: imageUrl })
+    
+    // Process in batches to avoid overwhelming the system
+    const batchSize = 50
+    for (let i = 0; i < fcmTokens.length; i += batchSize) {
+      const batch = fcmTokens.slice(i, i + batchSize)
+      
+      const batchPromises = batch.map(async (token) => {
+        const message = {
+          message: {
+            token: token,
+            notification: {
+              title: title,
+              body: description,
+              ...(imageUrl && imageUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) && { image: imageUrl })
+            },
+            data: {
+              title: title,
+              body: description,
+              type: 'announcement',
+              ...(imageUrl && { imageUrl: imageUrl })
+            }
           }
         }
-      }
 
-      try {
-        const response = await fetch(fcmUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(message)
-        })
+        try {
+          const response = await fetch(fcmUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(message)
+          })
 
-        const result = await response.json()
-        console.log(`FCM response for token ${token.substring(0, 10)}...`, response.status, result)
-        results.push({ token: token.substring(0, 10) + '...', success: response.ok, result })
-      } catch (error) {
-        console.error(`FCM error for token ${token.substring(0, 10)}...`, error)
-        results.push({ token: token.substring(0, 10) + '...', success: false, error: error.message })
-      }
+          const result = await response.json()
+          console.log(`FCM response for token ${token.substring(0, 10)}...`, response.status, result)
+          return { token: token.substring(0, 10) + '...', success: response.ok, result, status: response.status }
+        } catch (error) {
+          console.error(`FCM error for token ${token.substring(0, 10)}...`, error)
+          return { token: token.substring(0, 10) + '...', success: false, error: error.message }
+        }
+      })
+
+      const batchResults = await Promise.all(batchPromises)
+      results.push(...batchResults)
     }
 
     const successCount = results.filter(r => r.success).length
@@ -127,8 +162,10 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: `Notifications sent to ${successCount}/${totalCount} devices`,
-        results 
+        message: `Push notifications sent to ${successCount}/${totalCount} devices`,
+        tokensFound: totalCount,
+        successCount,
+        results: results.slice(0, 5) // Only return first 5 results to avoid large responses
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -139,7 +176,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('FCM Error:', error)
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
+      JSON.stringify({ success: false, error: error.message, timestamp: new Date().toISOString() }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500
