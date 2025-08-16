@@ -348,14 +348,25 @@ export function AnnouncementManagement() {
   return (
     <div className="space-y-6">
       <Tabs value={activeTab} onValueChange={tab => setActiveTab(tab as 'view' | 'add')} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="view" className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4" />
-            View Announcements
+        <TabsList
+          className="w-full flex flex-col sm:flex-row gap-2 sm:gap-0"
+          style={{overflow: 'visible'}}
+        >
+          <TabsTrigger
+            value="view"
+            className="flex items-center justify-center gap-1 px-2 py-2 text-sm sm:text-base w-full sm:w-auto"
+            style={{minWidth: 0}}
+          >
+            <MessageSquare className="h-5 w-5 sm:h-4 sm:w-4" />
+            <span className="hidden xs:inline sm:inline">View</span>
           </TabsTrigger>
-          <TabsTrigger value="add" className="flex items-center gap-2">
-            <Plus className="h-4 w-4" />
-            Create Announcement
+          <TabsTrigger
+            value="add"
+            className="flex items-center justify-center gap-1 px-2 py-2 text-sm sm:text-base w-full sm:w-auto"
+            style={{minWidth: 0}}
+          >
+            <Plus className="h-5 w-5 sm:h-4 sm:w-4" />
+            <span className="hidden xs:inline sm:inline">Create</span>
           </TabsTrigger>
         </TabsList>
 
